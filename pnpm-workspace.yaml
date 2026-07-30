@@ -1,0 +1,17 @@
+# AIOS — Configurazione workspace pnpm
+#
+# Obbligatorio per pnpm (a differenza di npm/yarn, pnpm richiede questo
+# file dedicato invece del campo "workspaces" in package.json — la sua
+# assenza era la causa del blocco "The workspaces field in package.json
+# is not supported by pnpm").
+#
+# I pattern rispecchiano esattamente la struttura descritta in README.md
+# e nei singoli README di ogni cartella.
+
+packages:
+  - "apps/*"
+  - "backend/services/*"
+  - "backend/gateway"
+  - "ai-platform/*"
+  - "ai-platform/agents/*"
+  - "packages/*"

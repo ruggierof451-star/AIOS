@@ -1,0 +1,45 @@
+{
+  "name": "aios",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AIOS — Artificial Intelligence Operating System. Monorepo principale. La lista dei workspace è in pnpm-workspace.yaml, non qui (pnpm non supporta il campo 'workspaces' di npm/yarn).",
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "build": "turbo run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:contract": "vitest run --config vitest.contract.config.ts",
+    "test:e2e": "turbo run test:e2e --filter=./tests/e2e",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:generate": "dotenv -e .env -- pnpm --filter @aios/domain-model run generate",
+    "db:migrate": "node scripts/wait-for-postgres.js && dotenv -e .env -- pnpm --filter @aios/domain-model run migrate",
+    "db:seed": "node scripts/wait-for-postgres.js && dotenv -e .env -- tsx scripts/seed-dev-db.ts",
+    "db:backfill-2.1": "node scripts/wait-for-postgres.js && dotenv -e .env -- tsx scripts/backfill-organization-v2.ts",
+    "dev": "node scripts/wait-for-postgres.js && turbo run dev",
+    "docs:serve": "echo 'Vedi /docs — documentazione architetturale AIOS (Product Bible + Engineering Bible)'"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "bcrypt": "^5.1.1"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@vitest/coverage-v8": "^2.0.0",
+    "dotenv-cli": "^7.4.2",
+    "eslint": "^9.0.0",
+    "prettier": "^3.3.0",
+    "prisma": "^5.18.0",
+    "tsx": "^4.16.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

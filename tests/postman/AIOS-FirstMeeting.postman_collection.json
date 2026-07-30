@@ -1,0 +1,608 @@
+{
+  "info": {
+    "name": "AIOS — Feature 2.1 First Meeting (Provisioning)",
+    "description": "Collection di verifica per la Feature 2.1 completa (Incrementi 1-7). Copre: creazione automatica dell'ambiente tramite il flusso First Meeting, idempotenza del provisioning, autenticazione service-to-service (test negativi dall'esterno). La ripresa dopo un'interruzione REALE richiede di fermare/riavviare un servizio a mano — vedi FIRST-MEETING-TEST-GUIDE.md, non automatizzabile in una collection Postman da sola. Esegui le cartelle in ordine, dall'alto verso il basso.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Health Check (porte dirette — non attraverso il Gateway)",
+      "description": "Ogni servizio espone /health senza prefisso — il Gateway instrada solo i prefissi /api/v1/*, quindi /health va chiamato direttamente sulla porta di ciascun servizio, mai tramite {{baseUrl}}. La collection di Milestone 1 aveva questo punto sbagliato (segnalato come debito mai risolto) — qui è corretto fin dall'inizio.",
+      "item": [
+        {
+          "name": "Gateway Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayUrl}}/health",
+              "host": [
+                "{{gatewayUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status è ok', function () { pm.expect(pm.response.json().status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Identity Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{identityUrl}}/health",
+              "host": [
+                "{{identityUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status è ok', function () { pm.expect(pm.response.json().status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Administration Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{administrationUrl}}/health",
+              "host": [
+                "{{administrationUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status è ok', function () { pm.expect(pm.response.json().status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Organization Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{organizationUrl}}/health",
+              "host": [
+                "{{organizationUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status è ok', function () { pm.expect(pm.response.json().status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Workspace Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{workspaceUrl}}/health",
+              "host": [
+                "{{workspaceUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status è ok', function () { pm.expect(pm.response.json().status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Onboarding (First Meeting) Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{onboardingUrl}}/health",
+              "host": [
+                "{{onboardingUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('status è ok', function () { pm.expect(pm.response.json().status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Setup — Nuovo Utente",
+      "description": "Crea un utente nuovo (non il demo, per non collidere con organizzazioni già esistenti da altre esecuzioni) e ottiene l'accessToken usato da tutto il resto della collection.",
+      "item": [
+        {
+          "name": "Registrazione nuovo utente (atteso 201, salva accessToken)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "baseUrl"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"sprint.review+{{$timestamp}}@aios.local\",\n  \"password\": \"{{newUserPassword}}\"\n}"
+            },
+            "description": "Email resa univoca ad ogni esecuzione con la variabile dinamica nativa di Postman {{$timestamp}} — nessuno script necessario. Prima usava un'email fissa: una seconda esecuzione della collection avrebbe ricevuto 409, e accessToken/userId non sarebbero mai stati impostati, facendo fallire a cascata ogni richiesta successiva. Corretto durante la revisione completa della collection."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test('accessToken presente', function () { pm.expect(body.data.accessToken).to.be.a('string'); });",
+                  "pm.environment.set('accessToken', body.data.accessToken);",
+                  "pm.environment.set('userId', body.data.userId);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. First Meeting — Flusso Completo",
+      "description": "Il vero test end-to-end: avvio sessione, provisioning, lettura stato, verifica che l'organizzazione esista davvero.",
+      "item": [
+        {
+          "name": "Avvia sessione (atteso 201, salva conversationId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/first-meeting/sessions",
+              "host": [
+                "baseUrl"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "first-meeting",
+                "sessions"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test('conversationId presente', function () { pm.expect(body.data.conversationId).to.be.a('string'); });",
+                  "pm.environment.set('conversationId', body.data.conversationId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Documenti legali correnti (atteso 200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/first-meeting/legal-documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "first-meeting",
+                "legal-documents"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "const docs = pm.response.json().data.documents;",
+                  "pm.test('almeno un documento presente', function () { pm.expect(docs.length).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Provisioning SENZA consenso legale (atteso 409 — verifica che il vincolo sia reale)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/first-meeting/provision",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "first-meeting",
+                "provision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationId\": \"{{conversationId}}\",\n  \"name\": \"Azienda di Prova Sprint Review\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 409 — il provisioning rifiuta senza consenso legale', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registra consenso legale (atteso 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/first-meeting/legal-consent",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "first-meeting",
+                "legal-consent"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationId\": \"{{conversationId}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test('quattro documenti accettati', function () {",
+                  "  pm.expect(body.data.acceptedDocuments.length).to.eql(4);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Provisioning — primo tentativo (atteso 201, salva organizationId/workspaceId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/first-meeting/provision",
+              "host": [
+                "baseUrl"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "first-meeting",
+                "provision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationId\": \"{{conversationId}}\",\n  \"name\": \"Azienda di Prova Sprint Review\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test('organizationId presente', function () { pm.expect(body.data.organizationId).to.be.a('string'); });",
+                  "pm.test('workspaceId presente', function () { pm.expect(body.data.workspaceId).to.be.a('string'); });",
+                  "pm.environment.set('organizationId', body.data.organizationId);",
+                  "pm.environment.set('workspaceId', body.data.workspaceId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stato sessione — tutti i passi devono risultare COMPLETED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/first-meeting/sessions/{{conversationId}}",
+              "host": [
+                "baseUrl"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "first-meeting",
+                "sessions",
+                "{{conversationId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "const steps = pm.response.json().data.steps;",
+                  "pm.test('legal_consent_given COMPLETED', function () { pm.expect(steps.legal_consent_given.status).to.eql('COMPLETED'); });",
+                  "pm.test('organization_created COMPLETED', function () { pm.expect(steps.organization_created.status).to.eql('COMPLETED'); });",
+                  "pm.test('roles_provisioned COMPLETED', function () { pm.expect(steps.roles_provisioned.status).to.eql('COMPLETED'); });",
+                  "pm.test('workspace_created COMPLETED', function () { pm.expect(steps.workspace_created.status).to.eql('COMPLETED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Provisioning — richiamata con lo stesso conversationId (idempotenza in condizioni normali, atteso 201, STESSI id)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/first-meeting/provision",
+              "host": [
+                "baseUrl"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "first-meeting",
+                "provision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationId\": \"{{conversationId}}\",\n  \"name\": \"Azienda di Prova Sprint Review\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test('stesso organizationId di prima — nessuna organizzazione duplicata', function () {",
+                  "  pm.expect(body.data.organizationId).to.eql(pm.environment.get('organizationId'));",
+                  "});",
+                  "pm.test('stesso workspaceId di prima', function () {",
+                  "  pm.expect(body.data.workspaceId).to.eql(pm.environment.get('workspaceId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Sicurezza — Autenticazione Service-to-Service (test negativi)",
+      "description": "Chiamate DIRETTE (bypassando il Gateway) verso endpoint interni, senza alcun token di servizio — devono essere rifiutate. Un 500 qui indicherebbe una regressione sulla correzione già fatta in ServiceAuthGuard (errore non gestito); un 200 indicherebbe che la protezione non è applicata.",
+      "item": [
+        {
+          "name": "Chiamata diretta a /default-roles SENZA token di servizio (atteso 401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{administrationUrl}}/api/v1/administration/organizations/{{organizationId}}/default-roles",
+              "host": [
+                "{{administrationUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "administration",
+                "organizations",
+                "{{organizationId}}",
+                "default-roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerUserId\": \"{{userId}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 401, mai 500', function () { pm.response.to.have.status(401); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chiamata diretta a /grants SENZA token di servizio (atteso 401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{administrationUrl}}/api/v1/administration/users/{{userId}}/grants?organizationId={{organizationId}}",
+              "host": [
+                "{{administrationUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "administration",
+                "users",
+                "{{userId}}",
+                "grants?organizationId={{organizationId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 401, mai 500', function () { pm.response.to.have.status(401); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

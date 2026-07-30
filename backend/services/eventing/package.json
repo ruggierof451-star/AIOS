@@ -1,0 +1,25 @@
+{
+  "name": "@aios/eventing-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Relay Transactional Outbox \u2192 Event Bus, con retry e Dead Letter Queue (Physical Database Schema sez. 5, Infrastructure Modulo 4 sez. 6).",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/relay.worker.ts",
+    "start": "node dist/relay.worker.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aios/domain-model": "workspace:*",
+    "@prisma/client": "^5.18.0",
+    "kafkajs": "^2.2.4"
+  },
+  "devDependencies": {
+    "prisma": "^5.18.0",
+    "typescript": "^5.5.0",
+    "tsx": "^4.16.0",
+    "vitest": "^2.0.0",
+    "@types/node": "^20.14.0"
+  }
+}

@@ -1,0 +1,90 @@
+name: AIOS CI
+
+# Pipeline coerente con Infrastructure Modulo 4, sezione 14 (Deployment) e
+# Tech Stack (docs/tech-stack.md): lint → typecheck → test → build → contract test
+# → scansione sicurezza. Il deploy vero e proprio (Staging/Produzione) è
+# un workflow separato, da aggiungere quando l'infrastruttura cloud sarà
+# provisionata (non richiesto da questa milestone di fondamenta).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: aios
+          POSTGRES_PASSWORD: aios_ci_password
+          POSTGRES_DB: aios_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aios -d aios_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://aios:aios_ci_password@localhost:5432/aios_ci
+      - run: pnpm test
+      - run: pnpm test:contract
+
+  build:
+    needs: [lint-and-typecheck, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+  # Scansione vulnerabilità immagini container prima di qualunque promozione
+  # verso Staging (Infrastructure Modulo 4, sezione 3.2) — placeholder da
+  # completare quando i Dockerfile dei singoli servizi saranno introdotti
+  # (Milestone 1 in poi, docs/implementation-plan.md).
+  security-scan:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Placeholder — scansione immagini da attivare da Milestone 1 in poi"

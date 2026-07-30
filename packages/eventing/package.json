@@ -1,0 +1,28 @@
+{
+  "name": "@aios/eventing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Publisher Outbox condiviso (pattern Transactional Outbox, Physical Database Schema sez. 5.1) \u2014 riutilizzabile da ogni Bounded Context.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aios/domain-model": "workspace:*",
+    "@prisma/client": "^5.18.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "typescript": "^5.5.0",
+    "@types/node": "^20.14.0"
+  }
+}

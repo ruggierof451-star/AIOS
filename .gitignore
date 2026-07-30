@@ -1,0 +1,50 @@
+# Dipendenze
+node_modules/
+.pnpm-store/
+
+# Build
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Ambiente e segreti — mai committare
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Log
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test
+coverage/
+.nyc_output/
+
+# Mobile (React Native / Expo)
+apps/mobile/.expo/
+apps/mobile/ios/Pods/
+apps/mobile/android/.gradle/
+
+# Desktop (Tauri)
+apps/desktop/src-tauri/target/
+
+# Database locale
+infrastructure/docker/postgres/data/
+
+# File generati da migrazioni/codegen (rigenerabili, non sorgente di verità)
+packages/domain-model/generated/

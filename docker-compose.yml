@@ -1,0 +1,131 @@
+# AIOS — Ambiente di sviluppo locale
+#
+# Avvia SOLO l'infrastruttura (Postgres, Redis, Redpanda, MinIO, ClickHouse).
+# I servizi applicativi (Identity, Organization, Workspace, Administration,
+# Eventing, Gateway) NON sono qui di proposito: per lo sviluppo locale
+# girano nativamente via `pnpm dev` (hot-reload immediato, niente rebuild
+# di immagini Docker ad ogni modifica) — se anche i loro container fossero
+# avviati qui, occuperebbero le stesse porte (3000-3004) e `pnpm dev`
+# fallirebbe con un conflitto di porta.
+#
+# Per una versione completamente containerizzata (utile per un test più
+# vicino a un ambiente di produzione, non per lo sviluppo quotidiano) vedi
+# docker-compose.services.yml, da usare in aggiunta a questo file:
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml up -d --build
+#
+# Sequenza standard per lo sviluppo (unica supportata "a comando singolo"):
+#   pnpm install
+#   docker compose up -d --build
+#   pnpm db:migrate
+#   pnpm db:seed
+#   pnpm dev
+#
+# Nota implementativa (non architetturale): per Kafka in locale usiamo Redpanda,
+# compatibile con il protocollo Kafka ma a binario singolo — molto più leggero
+# per lo sviluppo quotidiano. In produzione resta valida la scelta Kafka/gestito
+# già motivata nello Step 1 e nel Modulo 4 dell'Engineering Bible.
+
+version: "3.9"
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aios-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aios
+      POSTGRES_PASSWORD: aios_dev_password
+      POSTGRES_DB: aios_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - aios_postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aios -d aios_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: aios-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - aios_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: aios-redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --overprovisioned
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      # CAUSA DEL BUG "getaddrinfo ENOTFOUND redpanda" (verificata, non
+      # ipotizzata): Kafka/Redpanda non usa solo l'indirizzo di bootstrap
+      # per comunicare — dopo la connessione iniziale, il broker comunica
+      # al client (kafkajs, dentro Eventing) l'indirizzo "advertised" da
+      # usare per ogni operazione successiva. Con `redpanda:9092` qui,
+      # un processo eseguito NATIVAMENTE sull'host (come Eventing via
+      # `pnpm dev`, per design — vedi commento in cima a questo file)
+      # riceveva un indirizzo risolvibile solo DENTRO la rete Docker, mai
+      # dall'host. Deve corrispondere a come i client si connettono
+      # davvero nel flusso primario supportato: `localhost`.
+      - PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - aios_redpanda_data:/var/lib/redpanda/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: aios-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: aios_dev
+      MINIO_ROOT_PASSWORD: aios_dev_password
+    ports:
+      - "9000:9000"   # API S3-compatibile (Object Storage, Infrastructure sez. 5)
+      - "9001:9001"   # Console web
+    volumes:
+      - aios_minio_data:/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: aios-clickhouse
+    restart: unless-stopped
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9004:9000"   # Native interface
+    volumes:
+      - aios_clickhouse_data:/var/lib/clickhouse
+
+  # Vector DB dedicato: in locale usiamo pgvector (già nell'immagine postgres
+  # sopra) per semplicità di sviluppo, coerente con la strategia "pgvector in
+  # fase iniziale → Vector DB dedicato alla scala" già motivata nello Step 1,
+  # sezione 5.
+
+volumes:
+  aios_postgres_data:
+  aios_redis_data:
+  aios_redpanda_data:
+  aios_minio_data:
+  aios_clickhouse_data:

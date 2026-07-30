@@ -1,0 +1,68 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "envMode": "loose",
+  "globalDependencies": [
+    "tsconfig.base.json",
+    ".env"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": [
+        "^generate",
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "build/**"
+      ]
+    },
+    "dev": {
+      "dependsOn": [
+        "^generate",
+        "^build"
+      ],
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": [
+        "^generate",
+        "^build"
+      ],
+      "outputs": [
+        "coverage/**"
+      ]
+    },
+    "test:contract": {
+      "dependsOn": [
+        "^generate",
+        "^build"
+      ],
+      "outputs": []
+    },
+    "test:e2e": {
+      "dependsOn": [
+        "^generate",
+        "^build"
+      ],
+      "outputs": []
+    },
+    "lint": {
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^generate",
+        "^build"
+      ],
+      "outputs": []
+    },
+    "clean": {
+      "cache": false
+    },
+    "generate": {
+      "cache": false
+    }
+  }
+}

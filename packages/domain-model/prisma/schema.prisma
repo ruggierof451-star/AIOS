@@ -1,0 +1,555 @@
+// AIOS — Prisma Schema
+// Milestone 1: Identity, Organization, Workspace, Administration
+//
+// Coerente con Engineering Bible, Modulo 6 (Physical Database Schema):
+// - Uno schema Postgres per Bounded Context (sez. 1.1) → multiSchema di Prisma
+// - UUID v7 come chiave primaria (sez. 1.3) — generato applicativamente
+//   (vedi packages/domain-model/src/shared/uuid.ts), non da Postgres,
+//   per poter generare l'id lato client senza round-trip, come motivato
+//   nel documento originale.
+// - organization_id obbligatorio su ogni tabella di business (sez. 4.1)
+// - lock_version per optimistic locking (sez. 3.1)
+// - archived_at per soft delete (sez. 9.3), mai una vera DELETE su dati di business
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["identity", "organization", "workspace", "administration", "eventing", "onboarding", "legal"]
+}
+
+// ============================================================
+// IDENTITY — Domain Model sez. 2.1
+// ============================================================
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String?   @map("password_hash")
+  mfaEnabled   Boolean   @default(false) @map("mfa_enabled")
+  mfaSecret    String?   @map("mfa_secret") // cifrato a livello applicativo prima della persistenza
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  lockVersion  Int       @default(1) @map("lock_version")
+
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+  @@schema("identity")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+
+  @@schema("identity")
+}
+
+// Un refresh token per riga, rotante (API Contract, sez. 2.2):
+// ogni uso ne genera uno nuovo e invalida il precedente.
+model RefreshToken {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id])
+  tokenHash   String    @unique @map("token_hash") // mai il token in chiaro a riposo
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at") // popolato alla rotazione o revoca esplicita
+  replacedBy  String?   @map("replaced_by") // id del token che l'ha sostituito (audit rotazione)
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("refresh_tokens")
+  @@schema("identity")
+}
+
+// ============================================================
+// ORGANIZATION — Domain Model sez. 2.3
+// ============================================================
+
+model Organization {
+  id          String   @id @default(uuid())
+
+  // Denominazione: `name` è il nome commerciale/informale, sempre
+  // presente e usato per generare lo slug; `legalName` è la ragione
+  // sociale formale, ora opzionale (una startup in formazione può non
+  // averla ancora). `name` è nullable qui SOLO per permettere una
+  // migrazione non interattiva su righe esistenti (Milestone 2.1) — lo
+  // script di backfill lo valorizza da `legalName`, poi ogni nuova
+  // scrittura lo richiede a livello applicativo (Domain Model).
+  name        String?
+  // Immutabile una volta assegnato — nessun metodo nel dominio per
+  // modificarlo. Nullable per lo stesso motivo di `name` sopra: righe
+  // esistenti vengono backfillate da uno script dedicato dopo la
+  // migrazione strutturale, non dalla migrazione stessa.
+  slug        String?  @unique
+  legalName   String?  @map("legal_name")
+
+  vatNumber   String?  @map("vat_number")
+  taxCode     String?  @map("tax_code")
+  pec         String?
+  sdi         String?
+  email       String?
+  phone       String?
+  website     String?
+  logoUrl     String?  @map("logo_url")
+
+  address     String?
+  city        String?
+  province    String?
+  postalCode  String?  @map("postal_code")
+  country     String   @default("IT")
+
+  timezone        String @default("Europe/Rome")
+  language        String @default("it")
+  currency        String @default("EUR")
+  fiscalYearStart Int    @default(1)  @map("fiscal_year_start")
+  fiscalYearEnd   Int    @default(12) @map("fiscal_year_end")
+
+  // Valorizzato da Workspace in una milestone futura (nessuna relazione
+  // nativa: stessa convenzione cross-schema di ownerUserId sotto).
+  defaultWorkspaceId String? @map("default_workspace_id")
+
+  ownerUserId String   @map("owner_user_id") // riferimento a identity.users, senza FK nativa cross-schema (sez. 1.4)
+  plan        Plan     @default(STARTER)
+  status      OrganizationStatus @default(ACTIVE)
+
+  settings    Json?    // impostazioni libere per organizzazione (es. preferenze di fatturazione, branding)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at") // soft delete — valorizzato quando status passa a DELETED
+
+  // COLONNA TRANSITORIA (Milestone 2.1): superata da `status`, nessun
+  // codice applicativo la referenzia più. Mantenuta solo per permettere
+  // il backfill non interattivo di `status` sulle righe esistenti
+  // (status = ARCHIVED dove archived_at non è null, altrimenti ACTIVE).
+  // Rimozione pianificata in un micro-incremento successivo, dopo aver
+  // confermato il backfill in ogni ambiente.
+  archivedAt  DateTime? @map("archived_at")
+
+  lockVersion Int      @default(1) @map("lock_version")
+
+  branches Branch[]
+
+  @@map("organizations")
+  @@schema("organization")
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  BUSINESS
+  ENTERPRISE
+
+  @@schema("organization")
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+  DELETED
+
+  @@schema("organization")
+}
+
+model Branch {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String
+  createdAt      DateTime @default(now()) @map("created_at")
+  archivedAt     DateTime? @map("archived_at")
+
+  departments Department[]
+
+  @@index([organizationId])
+  @@map("branches")
+  @@schema("organization")
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  branchId  String   @map("branch_id")
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  archivedAt DateTime? @map("archived_at")
+
+  @@index([branchId])
+  @@map("departments")
+  @@schema("organization")
+}
+
+// ============================================================
+// WORKSPACE — Domain Model sez. 2.2
+// Nota: lo stato attivo di un Workspace (sessione corrente) vive in Redis
+// (Runtime, System Lifecycle) per bassa latenza — questa tabella conserva
+// solo le PREFERENZE persistenti dell'utente, non lo stato di sessione.
+// ============================================================
+
+model WorkspacePreference {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id") // riferimento a identity.users, senza FK nativa
+                                            // cross-schema (Physical DB Schema, sez. 1.4)
+  organizationId String   @map("organization_id")
+  sidebarExpanded Boolean @default(true) @map("sidebar_expanded")
+  density        Density  @default(COMFORTABLE)
+  theme          Theme    @default(SYSTEM)
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, organizationId])
+  @@map("workspace_preferences")
+  @@schema("workspace")
+}
+
+enum Density {
+  COMFORTABLE
+  COMPACT
+
+  @@schema("workspace")
+}
+
+// Workspace come spazio collaborativo con membri (Milestone 2) — distinto
+// da WorkspacePreference sopra (che sono le preferenze UI di un singolo
+// utente, non un'entità collaborativa). Concettualmente vicino al "Team"
+// della gerarchia Organization → Branch → Department → Team (Domain
+// Model, sezione 7.1), qui reso esplicito come proprio Aggregate Root
+// perché la Milestone 2 lo richiede con ciclo di vita e membership propri.
+model Workspace {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  name           String
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  archivedAt     DateTime? @map("archived_at")
+  lockVersion    Int       @default(1) @map("lock_version")
+
+  memberships WorkspaceMembership[]
+  invites     WorkspaceInvite[]
+
+  @@index([organizationId])
+  @@map("workspaces")
+  @@schema("workspace")
+}
+
+model WorkspaceMembership {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  userId      String   @map("user_id") // riferimento a identity.users, senza FK nativa
+  roleName    String   @map("role_name") // riferimento al nome di un Role di administration.roles
+  joinedAt    DateTime @default(now()) @map("joined_at")
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_memberships")
+  @@schema("workspace")
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+
+  @@schema("workspace")
+}
+
+model WorkspaceInvite {
+  id              String       @id @default(uuid())
+  workspaceId     String       @map("workspace_id")
+  workspace       Workspace    @relation(fields: [workspaceId], references: [id])
+  email           String
+  invitedByUserId String       @map("invited_by_user_id")
+  roleName        String       @map("role_name")
+  tokenHash       String       @unique @map("token_hash") // mai il token in chiaro a riposo, stesso principio dei refresh token
+  status          InviteStatus @default(PENDING)
+  expiresAt       DateTime     @map("expires_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  acceptedAt      DateTime?    @map("accepted_at")
+
+  @@index([workspaceId])
+  @@index([email])
+  @@map("workspace_invites")
+  @@schema("workspace")
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+
+  @@schema("workspace")
+}
+
+// ============================================================
+// ADMINISTRATION — Domain Model sez. 2.16, sez. 7 (RBAC)
+// ============================================================
+
+model Role {
+  id             String   @id @default(uuid())
+  organizationId String?  @map("organization_id") // null = ruolo di sistema predefinito,
+                                                     // non modificabile, condiviso da ogni tenant
+  name           String
+  isSystemRole   Boolean  @default(false) @map("is_system_role")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  permissions RolePermission[]
+  assignments UserRoleAssignment[]
+
+  @@unique([organizationId, name])
+  @@map("roles")
+  @@schema("administration")
+}
+
+// Permission come Value Object concettuale (Domain Model, sez. 4) — qui
+// rappresentato come riga per semplicità di query, non come Aggregate Root.
+model RolePermission {
+  id         String @id @default(uuid())
+  roleId     String @map("role_id")
+  role       Role   @relation(fields: [roleId], references: [id])
+  action     String // es. "crm.customer.create"
+  scope      Json?  // es. {"restrictTo": "assigned_only"} — Domain Model sez. 7.3
+
+  @@index([roleId])
+  @@map("role_permissions")
+  @@schema("administration")
+}
+
+model UserRoleAssignment {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  organizationId String   @map("organization_id")
+  roleId         String   @map("role_id")
+  role           Role     @relation(fields: [roleId], references: [id])
+  assignedAt     DateTime @default(now()) @map("assigned_at")
+
+  @@unique([userId, organizationId, roleId])
+  @@index([userId, organizationId])
+  @@map("user_role_assignments")
+  @@schema("administration")
+}
+
+// Audit Log trasversale (Physical Database Schema, sez. 9.1) — popolato per
+// ogni scrittura rilevante su ogni Aggregate Root di ogni Bounded Context,
+// non solo di Administration stesso.
+model AuditLogEntry {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  actorType      ActorType @map("actor_type")
+  actorId        String   @map("actor_id") // user_id oppure identificativo agente
+  action         String   // es. "invoice.issue"
+  resourceType   String   @map("resource_type")
+  resourceId     String   @map("resource_id")
+  beforeState    Json?    @map("before_state")
+  afterState     Json?    @map("after_state")
+  occurredAt     DateTime @default(now()) @map("occurred_at")
+
+  @@index([organizationId, resourceType, resourceId])
+  @@index([organizationId, occurredAt])
+  @@map("audit_log")
+  @@schema("administration")
+}
+
+enum ActorType {
+  USER
+  AGENT
+
+  @@schema("administration")
+}
+
+// ============================================================
+// EVENTING — Physical Database Schema, sezione 5.1
+// Transactional Outbox: scritto nella STESSA transazione locale che
+// modifica l'Aggregate Root. Un processo di relay separato (non incluso
+// in questa milestone, vedi docs/implementation-plan.md — Milestone 2)
+// legge le righe con publishedAt = null e le pubblica su Kafka/Redpanda.
+// ============================================================
+
+model OutboxEvent {
+  id             String    @id @default(uuid())
+  aggregateId    String    @map("aggregate_id")
+  eventType      String    @map("event_type")
+  eventVersion   Int       @default(1) @map("event_version")
+  payload        Json
+  organizationId String?   @map("organization_id") // null per eventi non legati a un tenant (es. UserRegistered prima della creazione di un'Organization)
+  correlationId  String?   @map("correlation_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  publishedAt    DateTime? @map("published_at")
+
+  @@index([publishedAt])
+  @@index([aggregateId])
+  @@map("outbox")
+  @@schema("eventing")
+}
+
+// Retry Queue e Dead Letter Queue (Physical Database Schema, sezione 5.4).
+// Popolate dal relay/consumer quando la pubblicazione o il consumo di un
+// evento fallisce — non duplicano l'Outbox (che riguarda solo l'invio
+// iniziale), tracciano il tentativo di CONSEGNA/CONSUMO successivo.
+model RetryQueueEntry {
+  id            String   @id @default(uuid())
+  eventId       String   @map("event_id") // riferimento a OutboxEvent.id, senza FK nativa
+  consumerName  String   @map("consumer_name") // quale consumatore ha fallito
+  attempt       Int      @default(1)
+  lastError     String   @map("last_error")
+  nextRetryAt   DateTime @map("next_retry_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([nextRetryAt])
+  @@map("retry_queue")
+  @@schema("eventing")
+}
+
+model DeadLetterEntry {
+  id           String   @id @default(uuid())
+  eventId      String   @map("event_id")
+  consumerName String   @map("consumer_name")
+  eventType    String   @map("event_type")
+  payload      Json
+  failureReason String  @map("failure_reason")
+  attemptsMade Int      @map("attempts_made")
+  movedAt      DateTime @default(now()) @map("moved_at")
+
+  @@map("dead_letter_queue")
+  @@schema("eventing")
+}
+
+// ============================================================
+// ONBOARDING — Feature 2.1 "First Meeting Foundation", Incremento 6
+// ============================================================
+//
+// ConversationSession è il punto in cui AIOS conserva lo stato del
+// primo incontro con l'imprenditore — non solo una trascrizione di
+// chat: traccia il progresso di qualunque attività (provisioning oggi;
+// import, inizializzazione AI, Business Brain, documenti in futuro)
+// tramite passi generici (ConversationStep), non campi dedicati per
+// ciascuna attività.
+//
+// Decisione esplicita (Incremento 6, dopo revisione dell'Incremento 5):
+// il modello precedente aveva `organizationId`/`workspaceId`/
+// `rolesProvisioned` come campi dedicati sulla sessione stessa — corretto
+// per un solo tipo di attività (il provisioning), ma avrebbe richiesto
+// una nuova colonna e una nuova migration per ogni futura attività
+// (import, AI, documenti...). Scartata anche l'alternativa "macchina a
+// stati con stati nominati": molte attività future sono indipendenti e
+// opzionali (import e configurazione AI non sono in sequenza obbligata),
+// e un'unica sequenza lineare di stati imporrebbe un ordine artificiale.
+//
+// `organizationId` resta un campo reale della sessione (è l'identificatore
+// che la lega al tenant, non il risultato di un passo come gli altri).
+// Ogni altra attività — incluso `workspaceId`, ora spostato nel
+// `resultData` del passo "workspace_created" — è un passo generico
+// identificato da una stringa (`stepKey`), senza alcuna migration
+// necessaria per aggiungerne di nuovi in futuro.
+model ConversationSession {
+  id             String                    @id @default(uuid())
+  userId         String                    @map("user_id")
+  organizationId String?                   @map("organization_id")
+  status         ConversationSessionStatus @default(IN_PROGRESS)
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  updatedAt      DateTime                  @updatedAt @map("updated_at")
+
+  steps ConversationStep[]
+
+  @@index([userId])
+  @@map("conversation_sessions")
+  @@schema("onboarding")
+}
+
+// Un passo generico di una sessione — provisioning oggi, qualunque
+// altra attività futura senza bisogno di una nuova colonna o di un
+// nuovo modello. `stepKey` è una stringa applicativa (es.
+// "organization_created", "roles_provisioned", "workspace_created",
+// in futuro "csv_import_completed", "ai_initialized"...), mai un enum:
+// un enum richiederebbe comunque una migration per ogni nuovo valore,
+// vanificando l'obiettivo di questo modello.
+model ConversationStep {
+  id          String                 @id @default(uuid())
+  sessionId   String                 @map("session_id")
+  session     ConversationSession    @relation(fields: [sessionId], references: [id])
+  stepKey     String                 @map("step_key")
+  status      ConversationStepStatus @default(PENDING)
+  resultData  Json?                  @map("result_data")
+  completedAt DateTime?              @map("completed_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+
+  @@unique([sessionId, stepKey])
+  @@index([sessionId])
+  @@map("conversation_steps")
+  @@schema("onboarding")
+}
+
+enum ConversationSessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+
+  @@schema("onboarding")
+}
+
+enum ConversationStepStatus {
+  PENDING
+  COMPLETED
+  FAILED
+
+  @@schema("onboarding")
+}
+
+// ============================================================
+// LEGAL — Feature 2.2 "First Conversation", Incremento 1
+// ============================================================
+//
+// Bounded Context separato da Onboarding per scelta esplicita (vedi
+// ADR-0001, docs/architecture/adr/): il consenso legale è concettualmente
+// distinto dall'orchestrazione del provisioning (ha proprie regole di
+// immutabilità, retention e query pattern), ma vive nello stesso
+// servizio (onboarding-service) perché operativamente è sempre invocato
+// nello stesso flusso — nessun beneficio pratico oggi da un servizio
+// dedicato, il confine concettuale basta a livello di schema.
+//
+// LegalDocumentAcceptance è append-only per costruzione: nessun metodo
+// di scrittura diverso da "crea una nuova riga" in nessun repository
+// che la usa — mai un update, mai una cancellazione applicativa.
+
+model LegalDocumentVersion {
+  id            String   @id @default(uuid())
+  documentType  String   @map("document_type")
+  version       Int
+  contentUrl    String   @map("content_url")
+  effectiveFrom DateTime @map("effective_from")
+  isCurrent     Boolean  @default(true) @map("is_current")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([documentType, version])
+  @@index([documentType, isCurrent])
+  @@map("legal_document_versions")
+  @@schema("legal")
+}
+
+// Un'accettazione è legata a userId + conversationId, non a
+// organizationId: al momento dell'accettazione (durante la First
+// Conversation, prima del provisioning) l'Organization non esiste
+// ancora — collegarla a organizationId avrebbe richiesto un
+// aggiornamento successivo di un record che deve restare immutabile.
+model LegalDocumentAcceptance {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  conversationId  String   @map("conversation_id")
+  documentType    String   @map("document_type")
+  documentVersion Int      @map("document_version")
+  acceptedAt      DateTime @default(now()) @map("accepted_at")
+  ipAddress       String?  @map("ip_address")
+  userAgent       String?  @map("user_agent")
+
+  @@index([userId])
+  @@index([conversationId])
+  @@map("legal_document_acceptances")
+  @@schema("legal")
+}

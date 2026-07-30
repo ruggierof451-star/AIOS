@@ -1,0 +1,165 @@
+# AIOS — Servizi applicativi containerizzati (OPZIONALE)
+#
+# Non usato per lo sviluppo quotidiano (vedi docker-compose.yml). Utile per
+# verificare un avvio "tipo produzione" completamente containerizzato.
+#
+# Uso (in aggiunta al file principale, mai da solo — servono postgres/redis/
+# redpanda dell'altro file):
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml up -d --build
+#
+# Se usi questo file, NON eseguire `pnpm dev` in parallelo: userebbe le
+# stesse porte (3000-3004) già occupate da questi container.
+#
+# LIMITE NOTO (dichiarato, non corretto qui — fuori dallo scope del bug
+# risolto in docker-compose.yml): Redpanda in quel file ora annuncia
+# `localhost:9092`, corretto per il flusso nativo primario (`pnpm dev`).
+# Se avvii DAVVERO questo file (percorso opzionale, mai il default), il
+# container `eventing` qui sotto proverebbe a raggiungere "localhost"
+# riferendosi a se stesso, non a Redpanda — romperebbe la connessione
+# Kafka in quel solo scenario. Redpanda supporta più listener/indirizzi
+# annunciati contemporaneamente per risolvere entrambi i casi insieme,
+# ma configurarlo non è nello scope di questa correzione, che riguarda
+# il flusso nativo effettivamente segnalato come rotto.
+#
+# Nota: questi servizi si affidano a un pnpm-lock.yaml già generato (via
+# `pnpm install` in locale almeno una volta) per una build riproducibile;
+# se il lockfile non esiste ancora, i Dockerfile eseguono comunque un
+# `pnpm install` regolare (non --frozen-lockfile) come fallback, vedi
+# commento in ogni Dockerfile.
+
+version: "3.9"
+
+services:
+
+  identity:
+    build:
+      context: .
+      dockerfile: backend/services/identity/Dockerfile
+    container_name: aios-identity
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://aios:aios_dev_password@postgres:5432/aios_dev
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_non_usare_in_produzione}
+      PORT: 3001
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  administration:
+    build:
+      context: .
+      dockerfile: backend/services/administration/Dockerfile
+    container_name: aios-administration
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://aios:aios_dev_password@postgres:5432/aios_dev
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:-dev_service_secret_non_usare_in_produzione}
+      PORT: 3002
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  organization:
+    build:
+      context: .
+      dockerfile: backend/services/organization/Dockerfile
+    container_name: aios-organization
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://aios:aios_dev_password@postgres:5432/aios_dev
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_non_usare_in_produzione}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:-dev_service_secret_non_usare_in_produzione}
+      ADMINISTRATION_SERVICE_URL: http://administration:3002
+      PORT: 3003
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      administration:
+        condition: service_started
+
+  workspace:
+    build:
+      context: .
+      dockerfile: backend/services/workspace/Dockerfile
+    container_name: aios-workspace
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://aios:aios_dev_password@postgres:5432/aios_dev
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_non_usare_in_produzione}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:-dev_service_secret_non_usare_in_produzione}
+      ADMINISTRATION_SERVICE_URL: http://administration:3002
+      PORT: 3004
+    ports:
+      - "3004:3004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      administration:
+        condition: service_started
+
+  onboarding:
+    build:
+      context: .
+      dockerfile: backend/services/onboarding/Dockerfile
+    container_name: aios-onboarding
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://aios:aios_dev_password@postgres:5432/aios_dev
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_non_usare_in_produzione}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:-dev_service_secret_non_usare_in_produzione}
+      ADMINISTRATION_SERVICE_URL: http://administration:3002
+      ORGANIZATION_SERVICE_URL: http://organization:3003
+      WORKSPACE_SERVICE_URL: http://workspace:3004
+      PORT: 3005
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      administration:
+        condition: service_started
+      organization:
+        condition: service_started
+      workspace:
+        condition: service_started
+
+  eventing:
+    build:
+      context: .
+      dockerfile: backend/services/eventing/Dockerfile
+    container_name: aios-eventing
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://aios:aios_dev_password@postgres:5432/aios_dev
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
+
+  gateway:
+    build:
+      context: .
+      dockerfile: backend/gateway/Dockerfile
+    container_name: aios-gateway
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      IDENTITY_SERVICE_URL: http://identity:3001
+      ADMINISTRATION_SERVICE_URL: http://administration:3002
+      ORGANIZATION_SERVICE_URL: http://organization:3003
+      WORKSPACE_SERVICE_URL: http://workspace:3004
+    ports:
+      - "8080:3000"
+    depends_on:
+      - identity
+      - administration
+      - organization
+      - workspace
