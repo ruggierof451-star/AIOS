@@ -1,9 +1,96 @@
+# CHANGELOG
+
+## AIOS 1.3.8 — 2026-08-01
+
+Versione completa e coerente, che sostituisce integralmente 1.3.7. Contiene tutto ciò che era
+stato consegnato negli incrementi 18-21 e che nel repository non era mai arrivato:
+
+- **`apps/web/Dockerfile`** — mancava del tutto: senza, il frontend non è costruibile come
+  immagine. Include già la correzione del postinstall.
+- **Correzione del postinstall in tutte e otto le immagini** (`COPY scripts/postinstall.js` +
+  `AIOS_SKIP_POSTINSTALL` prima di `pnpm install`) — l'errore
+  `Cannot find module '/repo/scripts/postinstall.js'` riguardava ogni Dockerfile, non solo il
+  Gateway.
+- **Otto `railway.json`** con builder, health check, `watchPatterns` e — solo su Identity —
+  l'applicazione delle migration.
+- **`.env.production.example`** e **`DEPLOY.md`**.
+- **`next@^14.2.35`** (la 14.2.5 bloccava il deploy per una vulnerabilità HIGH).
+
+Le voci sotto documentano ogni incremento nel dettaglio.
+
+---
+
 # Changelog
 
 Cronologia delle milestone di sviluppo funzionale di AIOS. Le fasi di
 bootstrap del monorepo (struttura, Docker, Prisma, pnpm/Turbo) precedono
 questo changelog e sono documentate in `docs/` (Product Bible + Engineering
 Bible) e nella cronologia della conversazione di sviluppo.
+
+---
+
+## Incremento 21: il postinstall rompeva la build di tutte le immagini
+
+**Data:** 2026-07-30
+
+Segnalato da un build Railway fallito sul Gateway:
+
+```
+Error: Cannot find module '/repo/scripts/postinstall.js'
+```
+
+### Causa, e portata più ampia della segnalazione
+
+Regressione introdotta dall'Incremento 16, quando ho aggiunto il `postinstall` alla radice.
+Negli stage `deps` dei Dockerfile si copiano solo i manifest e poi si esegue `pnpm install` —
+che ora invoca `node scripts/postinstall.js`, file che a quel punto nell'immagine non esiste.
+
+**Non riguardava solo il Gateway**: tutti e sette i Dockerfile del backend hanno la stessa
+struttura e sarebbero falliti allo stesso modo. Corretti tutti e otto (incluso `apps/web`).
+
+### Perché non `--ignore-scripts`
+
+Sarebbe la correzione di una riga, ed è sbagliata: **`bcrypt` è un modulo nativo** nelle
+dipendenze della radice, e senza il proprio script di installazione il binding non viene
+compilato. Il servizio Identity partirebbe e fallirebbe al primo login con un errore di
+binding mancante — un problema peggiore di quello risolto, e più difficile da diagnosticare.
+
+`apps/web` usava proprio `--ignore-scripts`: rimosso anche lì, per non lasciare due
+comportamenti diversi nello stesso repository.
+
+### La correzione
+
+In ogni stage `deps`, subito dopo la copia dei manifest della radice:
+
+```dockerfile
+COPY scripts/postinstall.js scripts/
+ENV AIOS_SKIP_POSTINSTALL=1
+```
+
+Si copia **il solo file**, non l'intera cartella `scripts/`: è piccolo e cambia di rado, quindi
+il livello di cache resta stabile — copiare tutta la cartella avrebbe invalidato l'installazione
+delle dipendenze a ogni modifica di uno script qualsiasi.
+
+E `scripts/postinstall.js` riconosce ora `AIOS_SKIP_POSTINSTALL` ed esce subito. Dentro
+un'immagine le due cose che fa sono **entrambe sbagliate**:
+
+- creare `.env` da `.env.example` cuocerebbe credenziali di sviluppo dentro l'immagine;
+- generare il client Prisma è già compito dello stage di build, che lo fa esplicitamente nel
+  momento in cui lo schema è realmente presente.
+
+La scelta è dichiarata dal Dockerfile con una variabile, non dedotta dallo script guardando un
+file mancante: chi legge il Dockerfile vede perché.
+
+La variabile vive solo negli stage `deps` e `build`; lo stage `runtime` riparte da
+un'immagine pulita, quindi non finisce in produzione.
+
+### Verifiche
+
+Ordine delle istruzioni controllato in tutti e otto i Dockerfile (copia e variabile precedono
+sempre `pnpm install`, nessun `--ignore-scripts` in una riga eseguita) e i tre comportamenti
+dello script provati davvero: senza variabile e senza schema si ferma con un messaggio
+esplicito; con la variabile esce subito senza fare nulla; su una macchina di sviluppo procede
+alla generazione.
 
 ---
 

@@ -42,6 +42,19 @@ const schema = path.join(pacchettoSchema, 'prisma', 'schema.prisma');
 
 const log = (m) => console.log(`[postinstall] ${m}`);
 
+// ── 0. Dentro un'immagine Docker questo script non deve fare nulla ────
+// Le due cose che fa servono a una macchina di sviluppo, non a un'immagine:
+//   · creare .env da .env.example → significherebbe cuocere credenziali di
+//     sviluppo dentro l'immagine;
+//   · generare il client Prisma → lo stage di build lo fa già, in modo
+//     esplicito e nel momento in cui lo schema è realmente presente.
+// Lo dichiara il Dockerfile con una variabile, invece di farlo dedurre
+// allo script da un file mancante: chi legge il Dockerfile vede la scelta.
+if (['1', 'true'].includes(process.env.AIOS_SKIP_POSTINSTALL ?? '')) {
+  log('saltato — AIOS_SKIP_POSTINSTALL è impostata (build di un\'immagine)');
+  process.exit(0);
+}
+
 // ── 1. L'ambiente deve esistere ──────────────────────────────────────
 // `.env` è in .gitignore: su un clone pulito non c'è.
 const env = path.join(radice, '.env');
