@@ -38,14 +38,26 @@ RUN pnpm --filter @aios/web run build
 
 # ---------- Stage: runtime ----------
 FROM node:20-alpine AS runtime
-WORKDIR /app
+# La cartella di lavoro resta DENTRO il workspace: i symlink di pnpm sono
+# relativi, quindi la posizione conta quanto il contenuto.
+WORKDIR /repo/apps/web
 ENV NODE_ENV=production
-RUN corepack enable
-COPY --from=build /repo/apps/web/.next ./.next
-COPY --from=build /repo/apps/web/public ./public
-COPY --from=build /repo/apps/web/package.json ./package.json
-COPY --from=build /repo/apps/web/next.config.mjs ./next.config.mjs
-COPY --from=build /repo/apps/web/node_modules ./node_modules
+
+# ── Perché si conserva l'intero albero del workspace ──────────────────
+# pnpm non mette una copia delle dipendenze dentro ogni package: crea
+# symlink RELATIVI verso il negozio virtuale in /repo/node_modules/.pnpm.
+# Copiando solo <servizio>/node_modules si portano via i symlink ma non
+# ciò a cui puntano, e il processo muore al primo require:
+#     Error: Cannot find module 'reflect-metadata'
+# Lo stesso vale per il client Prisma generato, che vive nel negozio.
+# Copiare /repo per intero conserva la disposizione esatta con cui la
+# build è riuscita: ciò che funzionava nello stage precedente funziona
+# qui, per costruzione.
+# Costo accettato: l'immagine contiene anche le dipendenze di sviluppo.
+# È una scelta di affidabilità sopra la dimensione — la potatura delle
+# dev-dependencies è un'ottimizzazione successiva, da fare quando il
+# deploy è verde e si può misurare l'effetto.
+COPY --from=build /repo /repo
 
 EXPOSE 3100
 CMD ["node_modules/.bin/next", "start", "-H", "0.0.0.0"]

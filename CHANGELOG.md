@@ -1,5 +1,57 @@
 # CHANGELOG
 
+## AIOS 1.3.9 — 2026-08-01
+
+**Correzione di runtime: i servizi partivano e morivano al primo `require`.**
+
+La build Docker passava, ma all'avvio:
+
+```
+Error: Cannot find module 'reflect-metadata'
+```
+
+### Causa
+
+pnpm non installa una copia delle dipendenze dentro ogni package: crea **symlink relativi**
+verso il negozio virtuale in `node_modules/.pnpm` alla radice del workspace. Lo stage runtime
+copiava solo `<servizio>/node_modules`, portandosi via i symlink ma non ciò a cui puntano.
+
+Riguardava **tutti e otto** i servizi, non solo il Gateway. E aveva un secondo effetto non
+ancora emerso: anche il **client Prisma generato** vive nel negozio, quindi ogni servizio che
+tocca il database sarebbe morto per lo stesso motivo, con un errore diverso e più confuso.
+
+### Correzione
+
+Lo stage runtime conserva l'intero albero (`COPY --from=build /repo /repo`) e la cartella di
+lavoro resta **dentro** il workspace (`WORKDIR /repo/<servizio>`): i symlink di pnpm sono
+relativi, quindi la posizione conta quanto il contenuto. È la stessa disposizione con cui la
+build è riuscita — ciò che funzionava nello stage precedente funziona qui per costruzione.
+
+Scartato `pnpm deploy`, che pure sarebbe la via ufficiale: ha comportamenti diversi fra pnpm 9
+e 10 e ricostruisce `node_modules` dal negozio, con il rischio concreto di perdere il client
+Prisma generato. Fra due strade non verificabili in questo ambiente ho scelto quella che non
+può fallire per costruzione.
+
+**Costo accettato e dichiarato**: l'immagine contiene anche le dipendenze di sviluppo. È
+affidabilità sopra dimensione — la potatura è un'ottimizzazione da fare quando il deploy è
+verde e se ne può misurare l'effetto.
+
+### Altro
+
+- `EXPOSE 3006` aggiunto al worker Eventing, che ora ha un health server e prima non esponeva
+  nulla.
+- Identity continua a copiare lo schema Prisma accanto al servizio: `prisma migrate deploy` del
+  `preDeployCommand` cerca `./prisma/schema.prisma` nella cartella corrente.
+
+### Verifiche
+
+Riprodotta la struttura a symlink di pnpm e provati entrambi i comportamenti: copiando solo
+`<servizio>/node_modules` il processo muore nel module loader; conservando l'albero parte.
+Più 26 controlli di coerenza: dipendenze interne copiate in ogni immagine, `WORKDIR` dentro il
+workspace, `EXPOSE` corretto, `startCommand` di `railway.json` allineato al `CMD`.
+
+---
+
 ## AIOS 1.3.8 — 2026-08-01
 
 Versione completa e coerente, che sostituisce integralmente 1.3.7. Contiene tutto ciò che era

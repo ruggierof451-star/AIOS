@@ -44,10 +44,29 @@ RUN pnpm --filter @aios/identity-service run build
 
 # ---------- Stage: runtime ----------
 FROM node:20-alpine AS runtime
-WORKDIR /app
+# La cartella di lavoro resta DENTRO il workspace: i symlink di pnpm sono
+# relativi, quindi la posizione conta quanto il contenuto.
+WORKDIR /repo/backend/services/identity
 ENV NODE_ENV=production
-COPY --from=build /repo/backend/services/identity/dist ./dist
-COPY --from=build /repo/backend/services/identity/node_modules ./node_modules
+
+# ── Perché si conserva l'intero albero del workspace ──────────────────
+# pnpm non mette una copia delle dipendenze dentro ogni package: crea
+# symlink RELATIVI verso il negozio virtuale in /repo/node_modules/.pnpm.
+# Copiando solo <servizio>/node_modules si portano via i symlink ma non
+# ciò a cui puntano, e il processo muore al primo require:
+#     Error: Cannot find module 'reflect-metadata'
+# Lo stesso vale per il client Prisma generato, che vive nel negozio.
+# Copiare /repo per intero conserva la disposizione esatta con cui la
+# build è riuscita: ciò che funzionava nello stage precedente funziona
+# qui, per costruzione.
+# Costo accettato: l'immagine contiene anche le dipendenze di sviluppo.
+# È una scelta di affidabilità sopra la dimensione — la potatura delle
+# dev-dependencies è un'ottimizzazione successiva, da fare quando il
+# deploy è verde e si può misurare l'effetto.
+COPY --from=build /repo /repo
+
+# Lo schema (e le sue migration) anche qui, perché `prisma migrate deploy`
+# del preDeployCommand cerca ./prisma/schema.prisma nella cartella corrente.
 COPY --from=build /repo/packages/domain-model/prisma ./prisma
 
 EXPOSE 3001
