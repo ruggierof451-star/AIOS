@@ -1,7 +1,23 @@
 # AIOS — Administration Service
 
 FROM node:20-alpine AS base
+
 WORKDIR /repo
+
+# ── OpenSSL: Prisma non parte senza ────────────────────────────────────
+# Le immagini node:*-alpine recenti non includono più `openssl`. Senza,
+# Prisma non riesce a rilevare la versione di libssl, ripiega su
+# "openssl-1.1.x" (che su Alpine 3.17+ non esiste) e il motore risponde
+# con testo d'errore invece che con JSON:
+#     Prisma failed to detect the libssl/openssl version
+#     Error: Could not parse schema engine response: SyntaxError...
+# Serve in TUTTI gli stage che eseguono Prisma: in build per
+# `prisma generate`, nel runtime per `prisma migrate deploy` — e devono
+# concordare, altrimenti il client viene generato per un target e il
+# deploy ne pretende un altro.
+# libc6-compat colma le differenze fra musl e glibc su cui i motori
+# precompilati contano.
+RUN apk add --no-cache openssl libc6-compat
 RUN corepack enable
 
 FROM base AS deps
@@ -43,6 +59,22 @@ RUN pnpm --filter @aios/rbac run build
 RUN pnpm --filter @aios/administration-service run build
 
 FROM node:20-alpine AS runtime
+
+# ── OpenSSL: Prisma non parte senza ────────────────────────────────────
+# Le immagini node:*-alpine recenti non includono più `openssl`. Senza,
+# Prisma non riesce a rilevare la versione di libssl, ripiega su
+# "openssl-1.1.x" (che su Alpine 3.17+ non esiste) e il motore risponde
+# con testo d'errore invece che con JSON:
+#     Prisma failed to detect the libssl/openssl version
+#     Error: Could not parse schema engine response: SyntaxError...
+# Serve in TUTTI gli stage che eseguono Prisma: in build per
+# `prisma generate`, nel runtime per `prisma migrate deploy` — e devono
+# concordare, altrimenti il client viene generato per un target e il
+# deploy ne pretende un altro.
+# libc6-compat colma le differenze fra musl e glibc su cui i motori
+# precompilati contano.
+RUN apk add --no-cache openssl libc6-compat
+
 # La cartella di lavoro resta DENTRO il workspace: i symlink di pnpm sono
 # relativi, quindi la posizione conta quanto il contenuto.
 WORKDIR /repo/backend/services/administration

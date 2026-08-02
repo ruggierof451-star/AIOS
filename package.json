@@ -1,6 +1,6 @@
 {
   "name": "aios",
-  "version": "1.3.9",
+  "version": "1.3.10",
   "private": true,
   "description": "AIOS — Artificial Intelligence Operating System. Monorepo principale. La lista dei workspace è in pnpm-workspace.yaml, non qui (pnpm non supporta il campo 'workspaces' di npm/yarn).",
   "scripts": {

@@ -14,6 +14,15 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["multiSchema"]
+
+  // Target dei motori, dichiarati invece che dedotti.
+  // "native" serve alla macchina di chi sviluppa (macOS, Windows, glibc);
+  // "linux-musl-openssl-3.0.x" è il target delle immagini node:20-alpine
+  // usate in produzione. Dichiararlo evita la classe di errori in cui il
+  // client viene generato per un target e il deploy ne pretende un altro
+  // — che è ciò che accade quando il rilevamento di libssl dà risultati
+  // diversi fra lo stage di build e quello di runtime.
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {

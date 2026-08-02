@@ -1,5 +1,55 @@
 # CHANGELOG
 
+## AIOS 1.3.10 — 2026-08-01
+
+**`prisma migrate deploy` falliva: manca OpenSSL nelle immagini Alpine.**
+
+```
+Prisma failed to detect the libssl/openssl version
+Error: Could not parse schema engine response: SyntaxError: Unexpected token 'E'...
+```
+
+### Causa
+
+Le immagini `node:*-alpine` recenti **non includono più il pacchetto `openssl`**. Senza,
+Prisma non riesce a rilevare la versione di libssl, ripiega su `openssl-1.1.x` — che su Alpine
+3.17+ non esiste — e il motore dello schema non riesce a caricarsi. Il `SyntaxError` è una
+conseguenza, non la causa: Prisma si aspetta JSON dal motore e riceve un messaggio d'errore
+testuale.
+
+Lo schema era corretto, come avevi verificato: il problema era nell'immagine.
+
+### Correzione
+
+1. **`apk add --no-cache openssl libc6-compat`** in ogni stage che parte da `node:20-alpine`,
+   in tutti e otto i Dockerfile — sia `base` (da cui derivano `deps` e `build`, dove gira
+   `prisma generate`) sia `runtime` (dove gira `prisma migrate deploy`).
+   Devono averlo **entrambi**: se il rilevamento di libssl dà esiti diversi fra i due stage, il
+   client viene generato per un target e il deploy ne pretende un altro — un secondo errore,
+   con un messaggio ancora più fuorviante.
+2. **`binaryTargets = ["native", "linux-musl-openssl-3.0.x"]`** nel `generator` dello schema:
+   il target di produzione è ora dichiarato invece che dedotto. `native` resta per le macchine
+   di sviluppo (macOS, Windows, glibc).
+
+### Valutato e scartato
+
+Passare a `node:20-slim` (Debian, che include OpenSSL) è la via che Prisma stesso suggerisce ed
+elimina l'intera classe di problemi musl. Non l'ho scelta perché cambierebbe la libc sotto a
+**bcrypt**, modulo nativo già compilato per musl, su otto immagini e senza poter fare un
+`docker build` di verifica qui. Con un deploy che sta finalmente avanzando, la correzione
+mirata è lo scambio giusto; il passaggio a Debian resta un'opzione ragionevole da valutare a
+freddo.
+
+### Verifiche
+
+24 controlli: `openssl` presente in ogni stage base di tutti e otto i Dockerfile, schema ancora
+strutturalmente valido (20 modelli e 9 enum, tutti con `@@schema`, nessuno schema usato e non
+dichiarato), `provider` e `url` invariati, e nessuna regressione sulle correzioni di 1.3.8 e
+1.3.9 (copia del postinstall, albero pnpm conservato, `WORKDIR` dentro il workspace). Gli 11
+pacchetti backend ricompilano puliti.
+
+---
+
 ## AIOS 1.3.9 — 2026-08-01
 
 **Correzione di runtime: i servizi partivano e morivano al primo `require`.**

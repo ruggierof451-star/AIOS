@@ -39,6 +39,15 @@ partirebbero in parallelo sulla stessa base dati.
 
 ---
 
+## Nota: OpenSSL nelle immagini
+
+Tutti i Dockerfile installano `openssl` e `libc6-compat`. Non è opzionale: le immagini
+`node:*-alpine` recenti non li includono, e senza di essi Prisma non riesce a caricare il
+motore dello schema — `prisma migrate deploy` fallisce con un errore che sembra di parsing
+(`Could not parse schema engine response`) ma è di caricamento della libreria.
+
+Se in futuro si cambia immagine di base, questo è il primo controllo da rifare.
+
 ## Passo 1 — Postgres
 
 Su Railway: **New → Database → PostgreSQL**. Railway espone `DATABASE_URL`; nei servizi usa il
