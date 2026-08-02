@@ -1,5 +1,75 @@
 # CHANGELOG
 
+## AIOS 1.3.11 — 2026-08-01
+
+**Le migration Prisma, che mancavano.**
+
+```
+P2021: The table identity.users does not exist
+No migration found in prisma/migrations
+```
+
+### Un errore mio, e vale la pena dirlo
+
+In `DEPLOY.md` avevo indicato la generazione delle migration come "Passo 0, da fare tu",
+motivandolo con il fatto che serve un database. **Non è vero**: `prisma migrate diff` produce
+il DDL da uno schema senza alcuna connessione. Ho scaricato su di te un passo che era mio, e
+il risultato è stato un deploy che arrivava fino in fondo e cadeva al primo login.
+
+### Cosa contiene ora il repository
+
+`packages/domain-model/prisma/migrations/20260801120000_init/migration.sql` — 441 righe:
+
+- i **7 schema** Postgres (`CREATE SCHEMA IF NOT EXISTS`), uno per Bounded Context;
+- i **9 tipi enumerati**;
+- le **20 tabelle** con colonne, tipi, nullabilità, default, chiavi primarie;
+- **31 indici** fra unique e non unique;
+- le **8 chiavi esterne**, con `ON DELETE RESTRICT ON UPDATE CASCADE` (il comportamento
+  predefinito di Prisma per le relazioni obbligatorie).
+
+Nessuna FK attraversa i confini fra schema: `organizations.owner_user_id`,
+`workspace_memberships.user_id` e `retry_queue.event_id` restano senza vincolo nativo, come
+prescrive il Physical Database Schema (sez. 1.4). È una scelta di dominio — legare due Bounded
+Context con una FK impedirebbe di separarli senza migrare i dati — non una dimenticanza.
+
+Più `migration_lock.toml` con `provider = "postgresql"`.
+
+### Applicazione automatica e seed
+
+Nuovo `scripts/release.js`, invocato dal `preDeployCommand` del **solo** servizio Identity:
+
+1. applica le migration; se falliscono **ferma il rilascio**, invece di far partire i servizi
+   su uno schema incompleto;
+2. esegue il seed dimostrativo **solo** se `AIOS_SEED_DEMO=1`. Se il seed fallisce il rilascio
+   prosegue: le migration sono già applicate e ci si può registrare dall'interfaccia.
+
+Il seed (`scripts/seed-dev-db.ts`) non è più bloccato in modo assoluto in produzione: ora la
+regola è "vietato salvo richiesta esplicita", con un avviso in chiaro nei log. Crea i tre
+utenti demo, un'organizzazione, i tre ruoli con i permessi, uno spazio di lavoro e i documenti
+legali — tutto in `upsert`, quindi rilanciarlo non duplica nulla.
+
+### Come ho verificato senza un database
+
+Nel container non c'è Postgres, quindi il DDL non è eseguibile qui. Ho scritto un
+confronto automatico fra schema Prisma e SQL che verifica **ogni** elemento: 20 tabelle,
+**163 colonne** (nome mappato, tipo, nullabilità), **60 default**, 31 indici, 8 chiavi
+esterne, 9 enum con i loro valori, 7 schema. Zero difformità.
+
+Il verificatore aveva dato 37 falsi positivi al primo giro — la regex dei default si spezzava
+sulle parentesi di `uuid()` e `now()`. Corretto prima di fidarmene: un controllo che sbaglia è
+peggio di nessun controllo.
+
+I cinque percorsi di `release.js` sono stati eseguiti davvero, con CLI simulate: senza
+`DATABASE_URL` si ferma; migration fallita ferma il rilascio; successo senza seed lo salta;
+successo con seed lo esegue; seed fallito lascia proseguire.
+
+### Limite dichiarato
+
+Il DDL non è mai stato eseguito su un Postgres reale. La corrispondenza con lo schema è
+verificata elemento per elemento, ma la prova definitiva è il tuo `prisma migrate deploy`.
+
+---
+
 ## AIOS 1.3.10 — 2026-08-01
 
 **`prisma migrate deploy` falliva: manca OpenSSL nelle immagini Alpine.**

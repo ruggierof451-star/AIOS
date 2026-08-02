@@ -13,14 +13,31 @@ import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
 
-// Rete di protezione: questo seed crea utenti con password nota. In
-// produzione sarebbe una porta aperta, quindi si rifiuta di partire.
-if (process.env.NODE_ENV === 'production') {
+// Rete di protezione: questo seed crea utenti con password NOTA.
+// In produzione è una porta aperta, quindi di norma si rifiuta di partire.
+//
+// L'unica eccezione è esplicita e volontaria: AIOS_SEED_DEMO=1. Serve a
+// popolare un ambiente dimostrativo appena creato, quando senza utenti non
+// si può nemmeno verificare che il deploy funzioni. Chi la imposta sa cosa
+// sta facendo — ed è invitato a rimuoverla subito dopo.
+const seedDemoRichiesto = ['1', 'true'].includes(process.env.AIOS_SEED_DEMO ?? '');
+
+if (process.env.NODE_ENV === 'production' && !seedDemoRichiesto) {
   console.error(
     'Il seed di sviluppo non gira in produzione: creerebbe account con password nota.\n' +
-      'Registra il primo utente dall\'interfaccia.',
+      'Se ti serve davvero un ambiente dimostrativo, imposta AIOS_SEED_DEMO=1 — e rimuovila\n' +
+      'appena hai verificato l\'accesso. Altrimenti registra il primo utente dall\'interfaccia.',
   );
   process.exit(1);
+}
+
+if (process.env.NODE_ENV === 'production' && seedDemoRichiesto) {
+  console.warn(
+    '\n⚠  AIOS_SEED_DEMO è attiva in PRODUZIONE.\n' +
+      '   Sto creando utenti dimostrativi con password nota (DemoPassword123!).\n' +
+      '   Cambia quelle password o elimina quegli account prima di usare AIOS con dati veri,\n' +
+      '   e rimuovi AIOS_SEED_DEMO dalle variabili del servizio.\n',
+  );
 }
 
 const prisma = new PrismaClient();

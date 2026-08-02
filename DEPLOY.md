@@ -16,37 +16,39 @@ frontend dove trovarlo.
 
 ---
 
-## Passo 0 — Una volta sola, in locale: generare le migration
+## Passo 0 — Nulla: le migration sono già nel repository
 
-Il repository non contiene ancora migration Prisma, quindi in produzione il database
-resterebbe **vuoto**: le tabelle non verrebbero create e ogni login fallirebbe.
+`packages/domain-model/prisma/migrations/20260801120000_init/` contiene la migrazione
+iniziale: i sette schema Postgres, i nove tipi enumerati e le venti tabelle.
 
-Vanno generate una volta sola sulla tua macchina, con Postgres locale avviato:
+Il servizio **Identity** le applica da solo prima di ogni rilascio, tramite il suo
+`preDeployCommand` (`node /repo/scripts/release.js`). È idempotente: su un database già
+aggiornato non fa nulla. **Solo Identity** lo fa — se lo facessero tutti e sette, partirebbero
+in parallelo sulla stessa base dati.
 
-```bash
-docker compose up -d
-pnpm install
-pnpm db:migrate          # crea packages/domain-model/prisma/migrations/
-git add packages/domain-model/prisma/migrations
-git commit -m "Migration iniziale"
+Se `prisma migrate deploy` fallisce, il rilascio **si ferma** invece di far partire i servizi
+su uno schema incompleto: un servizio che parte e poi risponde
+`The table identity.users does not exist` al login è più difficile da diagnosticare di un
+deploy che si rifiuta di procedere.
+
+### Utenti dimostrativi (facoltativi)
+
+Un ambiente appena creato non ha utenti, quindi non c'è modo di verificare che l'accesso
+funzioni. Puoi popolarlo impostando **sul servizio Identity**:
+
+```
+AIOS_SEED_DEMO=1
 ```
 
-Da qui in avanti la produzione applica le stesse migration da sola: il servizio Identity ha
-`preDeployCommand: npx prisma migrate deploy` nel suo `railway.json`.
+Al rilascio successivo vengono creati `admin@demo.aios.local`, `manager@demo.aios.local` e
+`employee@demo.aios.local` — password `DemoPassword123!` per tutti — insieme a
+un'organizzazione, ai tre ruoli con i relativi permessi, a uno spazio di lavoro e alle
+versioni correnti dei documenti legali. È idempotente: rilanciarlo non duplica nulla e non
+sovrascrive righe esistenti.
 
-**Solo Identity applica le migration**, di proposito: se lo facessero tutti e sette,
-partirebbero in parallelo sulla stessa base dati.
-
----
-
-## Nota: OpenSSL nelle immagini
-
-Tutti i Dockerfile installano `openssl` e `libc6-compat`. Non è opzionale: le immagini
-`node:*-alpine` recenti non li includono, e senza di essi Prisma non riesce a caricare il
-motore dello schema — `prisma migrate deploy` fallisce con un errore che sembra di parsing
-(`Could not parse schema engine response`) ma è di caricamento della libreria.
-
-Se in futuro si cambia immagine di base, questo è il primo controllo da rifare.
+**Toglila appena hai verificato l'accesso.** Sono account con password pubblica: vanno bene
+per provare un deploy, non per stare accanto a dati veri. Senza quella variabile il seed non
+parte, ed è il comportamento predefinito.
 
 ## Passo 1 — Postgres
 
