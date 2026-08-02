@@ -1,5 +1,67 @@
 # CHANGELOG
 
+## AIOS 1.3.12 — 2026-08-02
+
+**`release.js` non arrivava nell'immagine.**
+
+```
+Error: Cannot find module '/repo/scripts/release.js'
+```
+
+### Causa: un file può esistere e non essere dove verrà cercato
+
+Nella 1.3.11 ho creato `scripts/release.js` e l'ho collegato al `preDeployCommand`, ma non ho
+aggiunto la riga che lo porta dentro l'immagine. Gli stage `deps` copiano **un solo file** da
+`scripts/` — `postinstall.js` — e per una buona ragione: `pnpm install` lo esegue, e copiare
+l'intera cartella lì invaliderebbe la cache dell'installazione a ogni modifica di uno script
+qualsiasi. Ma quel solo file non basta all'immagine finita.
+
+Nessuna compilazione, nessun typecheck e nessun test poteva intercettarlo: il file esiste, è
+committato, si apre. Semplicemente non è dove verrà cercato.
+
+### Correzione
+
+`COPY scripts scripts` nello stage **`build`** di tutti e otto i Dockerfile. Nello stage build,
+non in `deps`: lì siamo già invalidati da qualunque modifica ai sorgenti, quindi copiare
+l'intera cartella non costa cache — e rende presenti anche gli script futuri senza doversene
+ricordare.
+
+Verificato che il seed non porti altre dipendenze mancanti: importa solo `@prisma/client`,
+`bcrypt` e `node:crypto`, tutti già presenti nell'immagine di Identity.
+
+### Il controllo che avrebbe preso questo bug, e che ora esiste
+
+`scripts/verifica-immagini.js` (`pnpm verify:images`): legge le istruzioni `COPY` di ogni
+Dockerfile, calcola cosa finisce davvero nell'immagine, e verifica che ogni file invocato dai
+comandi di `railway.json` — `preDeployCommand` e `startCommand` — sia lì dentro. Segue anche le
+dipendenze di secondo livello: gli script che `release.js` invoca a sua volta.
+
+**Controprova fatta**: rimossa temporaneamente la correzione da Identity, il controllo esce con
+codice 1 e segnala entrambi i problemi, con la causa esatta:
+
+```
+✗ backend/services/identity: preDeployCommand cita scripts/release.js,
+  presente nel repo ma MAI COPIATO nell'immagine
+✗ backend/services/identity: release.js invoca scripts/seed-dev-db.ts,
+  mai copiato nell'immagine
+```
+
+Un controllo che non può fallire non vale nulla — questo fallisce dove deve.
+
+### Verifiche
+
+Tutti e otto i Dockerfile conservano le correzioni delle release precedenti: `scripts/` +
+OpenSSL (1.3.10) + albero pnpm conservato con `WORKDIR` dentro il workspace (1.3.9) + copia del
+postinstall (1.3.8). Migration intatte (20 tabelle, 7 schema, 8 chiavi esterne), solo Identity
+con `preDeployCommand`, 11 pacchetti backend che ricompilano puliti.
+
+### Limite dichiarato, invariato
+
+Non posso eseguire `docker build` in questo ambiente. Il controllo simula il contenuto delle
+immagini leggendo le `COPY`: prende questa classe di errori, non sostituisce una build reale.
+
+---
+
 ## AIOS 1.3.11 — 2026-08-01
 
 **Le migration Prisma, che mancavano.**

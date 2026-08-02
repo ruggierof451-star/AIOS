@@ -41,6 +41,21 @@ COPY backend/services/workspace/package.json backend/services/workspace/
 RUN pnpm install
 
 FROM deps AS build
+
+# La cartella scripts/ per intero, non solo il postinstall.
+#
+# Lo stage `deps` sopra ne copia UN solo file, e per una buona ragione:
+# `pnpm install` esegue il postinstall, e copiare tutta la cartella lì
+# invaliderebbe la cache dell'installazione a ogni modifica di uno
+# script qualsiasi. Ma quel solo file non basta all'immagine finita:
+# il `preDeployCommand` di Railway esegue scripts/release.js, che a sua
+# volta può invocare scripts/seed-dev-db.ts. Senza questa riga il
+# rilascio muore con "Cannot find module '/repo/scripts/release.js'".
+#
+# Qui siamo nello stage `build`, che è già invalidato da qualunque
+# modifica ai sorgenti: copiare l'intera cartella non costa cache, e
+# rende presenti anche gli script futuri senza doversene ricordare.
+COPY scripts scripts
 COPY packages/domain-model packages/domain-model
 COPY packages/api-contract packages/api-contract
 COPY packages/rbac packages/rbac
